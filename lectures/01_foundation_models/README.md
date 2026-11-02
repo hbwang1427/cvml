@@ -59,6 +59,11 @@ downstream tasks. In vision, three things made this possible around 2020–2021:
 | Generation | GANs | Diffusion/flow transformers, Veo / Sora / Cosmos video models |
 | Action | task-specific policies | Vision-language-action models (RT-2, OpenVLA, π0) |
 
+![Six vision functions on one photo](figures/examples/ex_vision_functions.jpg)
+*Real outputs, no training: CLIP picks the scene label, OWLv2 finds objects from text, SAM turns
+boxes into masks, Depth Anything estimates depth and a 0.5B VLM writes a caption. Ask the class to
+spot what is missed (distant pedestrians, parked cars).*
+
 ![Vision backbone scale](figures/01_backbone_scale.png)
 
 ![Pretraining data scale](figures/02_pretraining_data.png)
@@ -98,6 +103,11 @@ $$
 
 SigLIP replaces the softmax with an independent sigmoid per pair, which scales better to huge batches.
 
+![Self-supervised learning signals](figures/examples/ex_representation.jpg)
+*Left: two augmented "views" that contrastive / DINO training pulls together. Middle: the MAE input
+with 75% of patches hidden. Right: DINOv2 patch features projected to RGB — the same colors land on
+the same body parts (head, chest, legs) although the model never saw a label.*
+
 ![ImageNet: supervised vs zero-shot](figures/03_imagenet_zero_shot.png)
 
 **Talking points**
@@ -123,6 +133,9 @@ SigLIP replaces the softmax with an independent sigmoid per pair, which scales b
 - **Florence-2** — a single small (0.23B / 0.77B) seq2seq model for captioning, detection,
   grounding and OCR via task tokens.
 
+![SAM ambiguity](figures/examples/ex_sam_ambiguity.jpg)
+*One click is ambiguous (face? front? whole dog?), so SAM returns three masks with confidence scores.*
+
 **Vision-language models (VLMs)** — the dominant recipe is
 
 ```
@@ -135,6 +148,10 @@ image ──► vision encoder (CLIP/SigLIP/DINO ViT) ──► projector (MLP) 
 - Open models: Qwen2.5-VL / Qwen3-VL, InternVL, Gemma 3, Molmo, PaliGemma 2. They output text
   that can encode **boxes and points** (grounding), which is what makes them useful labelers.
 - Closed frontier models (Gemini, GPT, Claude) handle documents, charts, and multi-image reasoning.
+
+![Open-vocabulary detection and VQA](figures/examples/ex_open_vocab_vlm.jpg)
+*Text in, boxes or answers out. Note the loose "tree trunk" box, and that the VLM silently skips
+the "what breed" half of the question: good material for the weaknesses below.*
 
 **Known weaknesses** (great discussion material): counting, fine spatial relations,
 hallucinating objects that are not there, small objects, and domain shift (e.g., X-ray, thermal).
@@ -150,6 +167,10 @@ hallucinating objects that are not there, small objects, and domain shift (e.g.,
 | 2023– | Diffusion Transformers (DiT, SiT), flow matching (SD3, FLUX) | Replace U-Net with a ViT; straighter probability paths |
 | 2024– | Visual autoregressive (VAR, MAR) | Next-scale / next-token prediction for images |
 | 2024– | Video & world models (Sora, Veo 3, Cosmos, Genie 3) | Generate consistent, controllable video; simulate environments |
+
+![Diffusion forward process](figures/examples/ex_diffusion.jpg)
+*The forward (noising) process on a real photo with a cosine schedule. A diffusion model is trained to
+run this backwards.*
 
 ![Generative FID progress](figures/04_generative_fid.png)
 
@@ -181,6 +202,11 @@ hallucinating objects that are not there, small objects, and domain shift (e.g.,
 Discussion: privacy and data access → why **self-supervised** learning dominates here; why
 regulatory validation (subgroup performance, calibration) matters more than benchmark SOTA.
 
+![SAM on medical images](figures/examples/ex_healthcare.jpg)
+*SAM segments ~100 nuclei zero-shot, but on a head CT a single click returns the head plus the
+scanner table; a box prompt gets the intracranial region. This is why MedSAM fine-tunes SAM with
+box prompts on medical data.*
+
 ### 6b. Robotics
 
 ![VLA model size](figures/06_vla_size.png)
@@ -193,6 +219,10 @@ regulatory validation (subgroup performance, calibration) matters more than benc
 - Trend: sizes are converging to 0.5–7B so the policy fits on the robot; data (not parameters) is
   the bottleneck — hence teleoperation fleets, simulation, and world models.
 
+![Language-grounded manipulation targets](figures/examples/ex_robotics.jpg)
+*The perception half of "pick up the chopsticks": language → OWLv2 box → SAM mask → target point.
+Modular stacks do this explicitly; VLAs such as OpenVLA and π0 learn it end-to-end.*
+
 ### 6c. Self-driving
 
 - **End-to-end planning:** UniAD (CVPR 2023 best paper) unifies detection, tracking, mapping,
@@ -204,6 +234,10 @@ regulatory validation (subgroup performance, calibration) matters more than benc
   driving video for training, testing rare scenarios and closed-loop evaluation.
 - Open question: how do you *verify* safety of a model whose reasoning is a black box? (Long tail,
   latency, calibrated uncertainty.)
+
+![Driving perception and VLM hallucination](figures/examples/ex_driving.jpg)
+*Detection plus monocular depth ranks road users by distance. Asked about hazards, a 0.5B VLM
+answers "Bicycles." — there are none (COCO ground truth). Grounded checks matter.*
 
 ---
 
@@ -273,3 +307,14 @@ where do humans still need to be in the loop?*
 All plots are generated by [`make_figures.py`](make_figures.py) from numbers reported in the
 original papers/model cards (`python make_figures.py`). They show **trends**; models differ in
 training data, resolution and evaluation protocol, so don't read them as a leaderboard.
+
+The example images in `figures/examples/` are real model outputs produced by
+[`make_examples.py`](make_examples.py) (CLIP ViT-B/32, OWLv2-base, SAM ViT-B, DINOv2-S,
+Depth Anything V2-S, SmolVLM-500M; runs on a laptop in a few minutes).
+
+Photo credits — COCO val2017 / Flickr:
+[bus at night](http://farm9.staticflickr.com/8046/8140155314_abf7a6c841_z.jpg) (CC BY 2.0),
+[noodle soup](http://farm6.staticflickr.com/5529/9471702865_6cf3a45fde_z.jpg) (CC BY 2.0),
+[dog on bench](http://farm9.staticflickr.com/8325/8113006533_a2d7ac54d0_z.jpg) (CC BY-SA 2.0),
+[sparrow](http://farm6.staticflickr.com/5004/5248448434_92747c5db2_z.jpg) (CC BY 2.0).
+Microscopy and head CT: scikit-image sample data (`human_mitosis`, `brain`).
