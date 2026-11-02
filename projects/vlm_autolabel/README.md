@@ -40,17 +40,42 @@ Deliverables:
 3. 20 annotated failure cases sorted into a taxonomy (missed small objects, wrong class,
    duplicate boxes, box too loose, hallucinated objects, ...).
 
-### Week 2 — Improve labels without training
+### Week 2 — VLMs, model combinations and a labeling harness
 
-Pick **at least two** and measure the change in mAP:
+`compare_pipelines.py` builds five labelers from the same frozen models and evaluates them on the
+same images. Every model output is cached, so trying a new combination rule takes seconds.
 
-- **Prompt engineering** — `"a photo of a {}"` vs. bare class names vs. synonyms/descriptions
-  (e.g., "traffic light" → "traffic signal on a pole"); prompt ensembling.
-- **VLM verifier** — crop each detection and ask a small VLM (Qwen2.5-VL-3B, Florence-2,
-  SmolVLM) *"Is this a {class}? Answer yes or no."*; drop the "no"s. Report precision gained vs. recall lost.
-- **Model ensemble** — fuse OWLv2 + Grounding DINO + a VLM's grounded boxes with weighted box fusion.
-- **SAM refinement** — tighten boxes using the SAM mask's bounding box; does mAP@0.75 improve?
-- **Test-time augmentation** — horizontal flip / multi-scale and merge.
+```bash
+python compare_pipelines.py --images data/coco_subset/images --gt data/coco_subset/gt.json \
+    --n 50 --out results/
+python visualize.py --images data/coco_subset/images --gt data/coco_subset/gt.json \
+    --preds results/preds_A.json results/preds_E.json --names "A: OWLv2" "E: harness" --out compare.jpg
+```
+
+| | Strategy | Models | Idea |
+|---|---|---|---|
+| A | Detector only | OWLv2 | Open-vocabulary detector, class names as text queries |
+| B | VLM only | Florence-2 (0.23B) | A VLM that *outputs boxes* (phrase grounding); no confidence scores |
+| C | Detector + VLM verifier | OWLv2 → SmolVLM-500M | Crop each box, ask *"Is this a {class}?"*, use P(yes) to re-score |
+| D | Ensemble | OWLv2 + Florence-2 | Fuse boxes; agreement between models boosts confidence |
+| E | **Harness** | all three | VLM tags which classes are present → ensemble restricted to those → every box verified |
+
+A **harness** is a small program that wraps several models and decides what to call next, much as
+an agent framework wraps an LLM with tools. Strategy E is a fixed pipeline; your job in Week 2 is to
+make it smarter. Implement **at least two** of the following and report the change in AP:
+
+- **Better verification prompts** — add context ("a photo of a street; is the highlighted object a
+  car?"), or show the full image with the box drawn instead of a crop.
+- **Count consistency** — ask the VLM *"How many cars are there?"*; if it disagrees with the detector,
+  lower the threshold or tile/zoom the image and detect again (small objects!).
+- **Bigger or different VLMs** — swap SmolVLM for Qwen2.5-VL-3B, Gemma 3 4B or Florence-2-large;
+  plot AP vs. seconds/image.
+- **Learned fusion** — fit a logistic regression on (OWLv2 score, P(yes), Florence agreement) using 20
+  labeled images; apply it to the rest. Is that still "no training"? Discuss.
+- **SAM refinement** — tighten boxes with the SAM mask's bounding box; does AP@0.75 improve?
+- **Agentic harness (extension)** — let a frontier VLM (Claude, Gemini or GPT via API) orchestrate:
+  give it tools `detect(classes)`, `zoom(region)`, `verify(box, class)` and `submit(labels)`, and let it
+  decide the order. Compare cost ($ / 100 images) and AP against E. Keep a budget cap!
 
 ### Week 3 — Human-in-the-loop & downstream value
 

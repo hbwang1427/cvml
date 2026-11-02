@@ -20,7 +20,7 @@
 | 25–35 | 4. Promptable vision & vision-language models | How do you "talk" to a vision model? |
 | 35–43 | 5. Generative computer vision | How did image/video generation get so good, and why does it matter for perception? |
 | 43–55 | 6. Domain foundation models: healthcare, robotics, driving | What transfers, what doesn't? |
-| 55–60 | 7. Open problems + project kickoff | What can *you* do without a GPU cluster? |
+| 55–60 | 7–8. Open problems + class project | What can *you* do without a GPU cluster? |
 
 ---
 
@@ -258,7 +258,68 @@ dataset was built by a model-in-the-loop engine that cut mask time from ~91 s to
 Your project asks: *how far can off-the-shelf VLMs + promptable segmenters go as labelers, and
 where do humans still need to be in the loop?*
 
-➡️ **[Project: Foundation Models as Data Labelers](../../projects/vlm_autolabel/README.md)**
+➡️ Project details and a worked example: [Section 8](#8-class-project--foundation-models-as-data-labelers)
+
+---
+
+## 8. Class project — Foundation Models as Data Labelers
+
+**Goal.** Build a labeling pipeline from frozen foundation models (detectors, VLMs, SAM), measure how
+good its labels are, and find out where a human is still needed. Laptop or free Colab GPU only; no
+large-scale training. Full spec, rubric and domain tracks: [projects/vlm_autolabel](../../projects/vlm_autolabel/README.md).
+
+| Week | Deliverable |
+|---|---|
+| 1 | Zero-shot baseline (OWLv2) on a 100–200 image COCO subset; mAP, PR curve, failure taxonomy |
+| 2 | VLMs + model combinations + a **labeling harness**; ablation table |
+| 3 | Human-in-the-loop correction time; train a small YOLO on auto-labels vs. GT labels |
+| 4 | 4-page report + 8-minute talk |
+
+**Five strategies to compare (all from frozen models):**
+
+| | Strategy | Models | Idea |
+|---|---|---|---|
+| A | Detector only | OWLv2 | Class names as text queries |
+| B | VLM only | Florence-2 (0.23B) | A VLM that outputs boxes (phrase grounding), no confidence |
+| C | Detector + VLM verifier | OWLv2 → SmolVLM-500M | Crop each box, ask "Is this a {class}?", re-score with P(yes) |
+| D | Ensemble | OWLv2 + Florence-2 | Fuse boxes; agreement boosts confidence |
+| E | Harness | all three | VLM tags classes present → ensemble on those → verify every box |
+
+```bash
+cd projects/vlm_autolabel
+python make_subset.py --ann annotations/instances_val2017.json \
+    --classes "person,car,bicycle,dog,traffic light" --n 100 --out data/coco_subset
+python compare_pipelines.py --images data/coco_subset/images --gt data/coco_subset/gt.json --n 40 --out results/
+python visualize.py --images data/coco_subset/images --gt data/coco_subset/gt.json \
+    --preds results/preds_A.json results/preds_B.json results/preds_E.json \
+    --names "A: OWLv2" "B: Florence-2" "E: harness" --min-score 0.15 --out compare.jpg
+```
+
+### Worked example (40 COCO val2017 images, 224 ground-truth boxes, MacBook)
+
+| Method | boxes | AP@[.5:.95] | AP@.5 | AR@100 |
+|---|---:|---:|---:|---:|
+| A detector (OWLv2) | 499 | **0.426** | **0.622** | 0.507 |
+| B VLM grounding (Florence-2) | 176 | 0.094 | 0.131 | 0.257 |
+| C detector + VLM verifier | 499 | 0.417 | 0.590 | 0.507 |
+| D ensemble (OWLv2 + Florence-2) | 573 | 0.373 | 0.535 | **0.509** |
+| E harness (tag → ensemble → verify) | 316 | 0.320 | 0.407 | 0.355 |
+
+![Ground truth vs auto-labels](figures/examples/ex_autolabel_compare.jpg)
+
+**What the example teaches (and what students should fix):**
+
+- **Naive combinations made things worse.** More models ≠ better labels: the simple fusion and
+  gating rules in C–E lose to OWLv2 alone. Designing the combination *is* the project.
+- **B has no confidence scores**, so every box is ranked equally and AP collapses; it also
+  hallucinates (a barrel labeled "bicycle", a TV labeled "car"). Scores matter as much as boxes.
+- **E's image-level tagging is the weak link**: when the 0.5B VLM says "no person" in a crowded
+  airport scene, every correct person box is dropped (bottom row). Gating on a weak model is risky;
+  use it to *re-weight*, not to *delete*.
+- **The verifier helps on persons but hurts on cars**: small crops of distant cars are hard to judge.
+  Try more context, bigger VLMs, or count-consistency checks; then measure again.
+- **Next step — agentic harness:** give a frontier VLM tools (`detect`, `zoom`, `verify`, `submit`)
+  and let it decide what to call; compare AP and $ / 100 images against these baselines.
 
 ---
 
