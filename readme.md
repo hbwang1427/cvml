@@ -4,6 +4,13 @@ A 20-hour introductory course covering the fundamentals of how cameras form imag
 machines perceive scenes (detection, segmentation, tracking), and how these ideas carry over
 to medical imaging problems such as segmentation and registration.
 
+## Advanced lectures (60 min each, with a hands-on project)
+
+| # | Lecture | Hands-on |
+|---|---------|----------|
+| 1 | [Computer Vision Foundations & Advanced Models](lectures/01_foundation_models/README.md) | [Project — Foundation models as data labelers](projects/vlm_autolabel/README.md) (3–4 weeks) |
+| 2 | [Interpretability: Vision Models → VLMs → LLMs](lectures/02_interpretability/README.md) | [Take-home — Tracing a concept from pixels to words](projects/interp_takehome/README.md) (6 hours) |
+
 ## Audience & Prerequisites
 
 - Comfortable with Python and NumPy
