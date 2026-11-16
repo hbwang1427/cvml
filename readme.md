@@ -9,7 +9,7 @@ to medical imaging problems such as segmentation and registration.
 | # | Lecture | Hands-on |
 |---|---------|----------|
 | 1 | [Computer Vision Foundations & Advanced Models](lectures/01_foundation_models/README.md) | [Project — Foundation models as data labelers](projects/vlm_autolabel/README.md) (3–4 weeks) |
-| 2 | [Interpretability: Vision Models → VLMs → LLMs](lectures/02_interpretability/README.md) | [Take-home — Tracing a concept from pixels to words](projects/interp_takehome/README.md) (6 hours) |
+| 2 | [Interpretability: What Have Vision Models Learned?](lectures/02_interpretability/README.md) | [Take-home — What has a vision model learned?](projects/interp_takehome/README.md) (6 hours) |
 
 ## Audience & Prerequisites
 

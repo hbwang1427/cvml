@@ -1,7 +1,7 @@
-"""Part C -- activation patching on GPT-2 small: indirect-object identification (IOI).
+"""Optional extension -- activation patching on GPT-2 small: indirect-object identification (IOI).
 
-    python part_c_llm.py --corruption swap --out results/llm
-    python part_c_llm.py --corruption abc  --out results/llm
+    python ext_llm_ioi.py --corruption swap --out results/llm
+    python ext_llm_ioi.py --corruption abc  --out results/llm
 
 Denoising patch: run the *corrupted* prompts and copy one activation from the *clean* run. The metric is
 the share of the clean-vs-corrupted logit difference that this single activation restores:

@@ -1,11 +1,14 @@
 """Generate the example figures for Lecture 02 (Interpretability) by running real models.
 
 Every panel is an actual model output or a tiny model trained here; nothing is copied from papers.
-Models (all small, laptop-friendly): ViT-Tiny ImageNet classifier, CLIP ViT-B/32, DINOv2-S,
-SmolVLM-256M, GPT-2 small.
+Models (all small, laptop-friendly): ResNet-50 and ViT-Tiny ImageNet classifiers, CLIP ViT-B/32,
+DINOv2-S, SmolVLM-256M, GPT-2 small.
 
-    pip install torch transformers pillow matplotlib
-    python make_examples.py              # writes JPGs into ./figures (~3 min on a laptop)
+The representation figures (units, embedding, cka) use the take-home's 1,000-image COCO subset: run
+projects/interp_takehome/make_data.py first.
+
+    pip install torch torchvision transformers pillow matplotlib scikit-learn
+    python make_examples.py              # writes JPGs into ./figures (~6 min on a laptop)
     python make_examples.py llm_patching # just one figure
 """
 import copy
@@ -59,6 +62,180 @@ def heat(ax, image, sal, title, cmap="inferno"):
     ax.imshow(np.array(Image.fromarray((sal * 255).astype(np.uint8)).resize(image.size, Image.BILINEAR)),
               cmap=cmap, alpha=0.6)
     clean(ax, title)
+
+
+# ================================================================ 0. representation basics (uses the take-home data)
+TAKEHOME = HERE.parents[1] / "projects" / "interp_takehome"
+TH_DATA = TAKEHOME / "data" / "coco1k"
+
+
+def _takehome():
+    """Import the take-home's interp_utils and load its COCO subset (run its make_data.py first)."""
+    if not (TH_DATA / "labels.json").exists():
+        raise SystemExit(f"{TH_DATA} not found: run projects/interp_takehome/make_data.py first")
+    sys.path.insert(0, str(TAKEHOME))
+    import interp_utils as iu
+    return iu, iu.load_coco(TH_DATA)["images"]
+
+
+# hand-picked from projects/interp_takehome/q1_units.py (best-IoU units per stage), with a short tag
+UNITS = [("layer1", 101, "green"), ("layer1", 4, "orange / yellow"), ("layer2", 51, "text, signs"),
+         ("layer3", 434, "street vehicles"), ("layer4", 754, "cats"), ("layer4", 797, "bananas")]
+STAGE_IDX = {"layer1": 3, "layer2": 7, "layer3": 13, "layer4": 16}
+STAGE_GRID = {"layer1": 56, "layer2": 28, "layer3": 14, "layer4": 7}
+STAGE_CROP = {"layer1": 48, "layer2": 80, "layer3": 128, "layer4": 224}
+STAGE_RF = {"layer1": 35, "layer2": 91, "layer3": 267, "layer4": 427}
+
+
+@torch.no_grad()
+def fig_units():
+    iu, recs = _takehome()
+    enc = iu.Encoder("resnet50")
+    peak = {u: [] for u in UNITS}
+    for i in range(0, len(recs), 32):
+        acts = enc.layers(enc.pixels([iu.open_image(r) for r in recs[i:i + 32]]))
+        for u in UNITS:
+            a = acts[STAGE_IDX[u[0]]][:, u[1]].flatten(1)
+            v, pos = a.max(1)
+            peak[u].append(torch.stack([v, pos.float()], 1).cpu())
+    k = 5
+    fig = plt.figure(figsize=(10, 6.6))
+    gs = fig.add_gridspec(len(UNITS), 2 + k, width_ratios=[3.2, 0.7] + [1] * k, wspace=0.06, hspace=0.1)
+    w = enc.model.conv1.weight.detach().cpu()
+    w = (w - w.amin((1, 2, 3), keepdim=True)) / (w.amax((1, 2, 3), keepdim=True) - w.amin((1, 2, 3), keepdim=True))
+    grid = torch.ones(3, 8 * 8, 8 * 8)
+    for j, f in enumerate(w):
+        r, c = divmod(j, 8)
+        grid[:, r * 8:r * 8 + 7, c * 8:c * 8 + 7] = f
+    ax = fig.add_subplot(gs[1:5, 0])
+    ax.imshow(grid.permute(1, 2, 0).numpy(), interpolation="nearest")
+    clean(ax, "conv1: all 64 filters (7x7 RGB)")
+    for row, u in enumerate(UNITS):
+        st, unit, tag = u
+        pk = torch.cat(peak[u]).numpy()
+        g = STAGE_GRID[st]
+        for col, n in enumerate(np.argsort(-pk[:, 0])[:k]):
+            img = np.asarray(iu.square_crop(iu.open_image(recs[n])))
+            yy, xx = divmod(int(pk[n, 1]), g)
+            cy, cx = (yy + 0.5) * 224 / g, (xx + 0.5) * 224 / g
+            h = STAGE_CROP[st] // 2
+            y0, x0 = int(np.clip(cy - h, 0, 224 - 2 * h)), int(np.clip(cx - h, 0, 224 - 2 * h))
+            ax = fig.add_subplot(gs[row, 2 + col])
+            ax.imshow(img[y0:y0 + 2 * h, x0:x0 + 2 * h]); ax.set_xticks([]); ax.set_yticks([])
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            if col == 0:
+                ax.set_ylabel(f"{st} #{unit}\n{tag}", fontsize=8, color=INK)
+    fig.suptitle("ResNet-50 (ImageNet): first-layer filters and top dataset examples of single units",
+                 x=0.01, ha="left", fontsize=11, color=INK)
+    fig.savefig(OUT / "ex_units.jpg", dpi=120, bbox_inches="tight"); plt.close(fig)
+    print("wrote", OUT / "ex_units.jpg")
+
+
+@torch.no_grad()
+def fig_embedding():
+    from collections import Counter
+    from sklearn.manifold import TSNE
+    iu, recs = _takehome()
+    keep = [r for r in recs if r["dominant_frac"] >= 0.05]
+    cnt = Counter(r["dominant"] for r in keep)
+    classes = sorted(c for c, n in cnt.items() if n >= 20)
+    keep = [r for r in keep if r["dominant"] in classes]
+    y = np.array([classes.index(r["dominant"]) for r in keep])
+    train, _ = iu.split_ids(keep)
+    tr = np.array([r["id"] in train for r in keep])
+    pal = [BLUE, ORANGE, AQUA, "#eda100", "#e24a94", "#4f9e2a", VIOLET, RED, "#52514e"]
+    models = [("clip", "CLIP (trained)"), ("clip_random", "same architecture, random weights")]
+    fig = plt.figure(figsize=(13, 6.2))
+    gs = fig.add_gridspec(2, 13, height_ratios=[3.2, 1], width_ratios=[1] * 6 + [0.3] + [1] * 6,
+                          hspace=0.25, wspace=0.08)
+    query = next(i for i in np.where(~tr)[0] if classes[y[i]] == "animal")
+    for m, (name, title) in enumerate(models):
+        enc = iu.Encoder(name)
+        Z = iu.run_batched(lambda ims: enc.embed(enc.pixels(ims)), keep, verbose=False)
+        Z = Z / np.linalg.norm(Z, axis=1, keepdims=True)
+        nn = np.argsort(-(Z[~tr] @ Z[tr].T), 1)[:, :10]
+        pred = np.array([Counter(y[tr][r]).most_common(1)[0][0] for r in nn])
+        from sklearn.metrics import balanced_accuracy_score
+        acc = balanced_accuracy_score(y[~tr], pred)
+        P = TSNE(2, perplexity=30, init="pca", random_state=0).fit_transform(Z)
+        ax = fig.add_subplot(gs[0, 7 * m:7 * m + 6])
+        for c in range(len(classes)):
+            ax.scatter(*P[y == c].T, s=5, color=pal[c], label=classes[c])
+        ax.set_xticks([]); ax.set_yticks([])
+        ax.set_title(f"{title}\n10-NN balanced accuracy {acc:.2f} (chance {1 / len(classes):.2f})", fontsize=10)
+        if m == 1:
+            ax.legend(fontsize=7, markerscale=2.5, loc="center left", bbox_to_anchor=(1, 0.5), frameon=False)
+        sims = Z @ Z[query]
+        sims[query] = -np.inf
+        for col, j in enumerate([query] + list(np.argsort(-sims)[:5])):
+            ax = fig.add_subplot(gs[1, 7 * m + col])
+            ax.imshow(iu.square_crop(iu.open_image(keep[j]), 112)); ax.set_xticks([]); ax.set_yticks([])
+            ax.set_xlabel("query" if col == 0 else classes[y[j]], fontsize=7)
+            if col == 0:
+                ax.set_ylabel("CLIP" if m == 0 else "random", fontsize=8)
+        del enc
+    fig.suptitle(f"Embedding space of {len(keep)} COCO images, coloured by the largest object's supercategory "
+                 "(t-SNE), and nearest neighbours of one query", x=0.01, ha="left", fontsize=11, color=INK)
+    fig.savefig(OUT / "ex_embedding.jpg", dpi=120, bbox_inches="tight"); plt.close(fig)
+    print("wrote", OUT / "ex_embedding.jpg")
+
+
+@torch.no_grad()
+def fig_cka(n=500):
+    iu, recs = _takehome()
+    recs = recs[:n]
+    feats = {}
+    for name in ("dinov2", "clip"):
+        enc = iu.Encoder(name)
+        feats[name] = iu.run_batched(lambda ims: enc.pooled_layers(enc.pixels(ims), "mean"), recs, verbose=False)
+        del enc
+    fig, axes = plt.subplots(1, 2, figsize=(9.5, 4))
+    fig.subplots_adjust(wspace=0.35)
+    for ax, (a, b) in zip(axes, [("dinov2", "dinov2"), ("clip", "dinov2")]):
+        K = np.array([[iu.linear_cka(xa, xb) for xb in feats[b]] for xa in feats[a]])
+        im = ax.imshow(K, origin="lower", vmin=0, vmax=1, cmap="viridis")
+        ax.set_xlabel(f"{b} layer"); ax.set_ylabel(f"{a} layer")
+        ax.set_xticks(range(0, 13, 2)); ax.set_yticks(range(0, 13, 2))
+        ax.set_title(f"{a} vs {b}", fontsize=10)
+    fig.colorbar(im, ax=axes.tolist(), shrink=0.85, label="linear CKA")
+    fig.suptitle(f"Linear CKA between layers (mean-pooled tokens, {n} COCO images)", x=0.01, ha="left",
+                 fontsize=11, color=INK)
+    fig.savefig(OUT / "ex_cka.jpg", dpi=130, bbox_inches="tight"); plt.close(fig)
+    print("wrote", OUT / "ex_cka.jpg")
+
+
+@torch.no_grad()
+def fig_patch_pca(size=448):
+    from transformers import AutoImageProcessor, AutoModel
+    sys.path.insert(0, str(TAKEHOME))
+    from interp_utils import square_crop
+    model = AutoModel.from_pretrained("facebook/dinov2-small").to(DEVICE).eval()
+    proc = AutoImageProcessor.from_pretrained("facebook/dinov2-small")
+    keys = ["dog", "bird", "street", "table"]
+    fig, axes = plt.subplots(3, len(keys), figsize=(3.0 * len(keys), 9.0))
+    for col, key in enumerate(keys):
+        img = square_crop(coco_image(key), size)
+        x = (torch.from_numpy(np.asarray(img, np.float32) / 255) - torch.tensor(proc.image_mean)) / \
+            torch.tensor(proc.image_std)
+        tok = model(pixel_values=x.permute(2, 0, 1)[None].to(DEVICE)).last_hidden_state[0, 1:].float().cpu()
+        g = int(len(tok) ** 0.5)
+        tok = tok - tok.mean(0)
+        _, _, V = torch.linalg.svd(tok, full_matrices=False)
+        pcs = (tok @ V[:3].T).reshape(g, g, 3)
+        pc1 = pcs[..., 0]
+        if torch.cat([pc1[0], pc1[-1], pc1[:, 0], pc1[:, -1]]).mean() > 0:
+            pc1 = -pc1
+        rgb = (pcs - pcs.amin((0, 1))) / (pcs.amax((0, 1)) - pcs.amin((0, 1)))
+        axes[0, col].imshow(img); clean(axes[0, col], key)
+        axes[1, col].imshow(rgb.numpy(), interpolation="nearest"); clean(axes[1, col], "PCs 1-3 as RGB")
+        axes[2, col].imshow(img)
+        axes[2, col].imshow(np.array(Image.fromarray(((pc1 > 0).numpy() * 255).astype(np.uint8)).resize(
+            img.size, Image.NEAREST)), cmap="gray", alpha=0.55)
+        clean(axes[2, col], "PC 1 > 0 (bright)")
+    fig.suptitle(f"DINOv2-S patch features ({g}x{g} patches): PCA within each image", x=0.01, ha="left",
+                 fontsize=11, color=INK)
+    save(fig, "ex_patch_pca.jpg")
 
 
 # ================================================================ 1. saliency + sanity check
@@ -566,7 +743,8 @@ def fig_superposition():
     save(fig, "ex_superposition.jpg")
 
 
-FIGS = {"saliency": fig_saliency_sanity, "clip": fig_clip, "dino": fig_dino_heads,
+FIGS = {"units": fig_units, "embedding": fig_embedding, "cka": fig_cka, "patch_pca": fig_patch_pca,
+        "saliency": fig_saliency_sanity, "clip": fig_clip, "dino": fig_dino_heads,
         "vlm_logit_lens": fig_vlm_logit_lens, "vlm_knockout": fig_vlm_knockout,
         "llm_logit_lens": fig_llm_logit_lens, "llm_patching": fig_llm_patching,
         "superposition": fig_superposition}

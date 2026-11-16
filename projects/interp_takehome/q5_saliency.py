@@ -1,6 +1,6 @@
-"""Part A1 -- do saliency maps explain CLIP? Randomisation sanity checks + deletion curves.
+"""Q5 -- do saliency maps explain CLIP? Randomisation sanity checks + deletion curves.
 
-    python part_a_saliency.py --data data/coco400 --n 30 --out results/saliency
+    python q5_saliency.py --data data/coco1k --n 30 --out results/saliency
 
 For each image (whose zero-shot top-1 is a class actually in the image), computes gradient, gradient x
 input and integrated-gradients maps for log P(class), then
@@ -26,7 +26,7 @@ CASCADE = [1, 3, 6, 12]
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default="data/coco400")
+    ap.add_argument("--data", default="data/coco1k")
     ap.add_argument("--n", type=int, default=30)
     ap.add_argument("--fill", default="blur", choices=["blur", "grey"])
     ap.add_argument("--out", default="results/saliency")

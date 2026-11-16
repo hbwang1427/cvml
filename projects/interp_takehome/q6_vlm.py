@@ -1,9 +1,9 @@
-"""Part B -- where and how does a small VLM use the image? POPE-style questions + attention knockout.
+"""Q6 -- where and how does a small VLM use the image? POPE-style questions + attention knockout.
 
     # 1) answer POPE-style yes/no questions, save P(yes) and last-token hidden states
-    python part_b_vlm.py pope --data data/coco400 --n 150 --out results/vlm
+    python q6_vlm.py pope --data data/coco1k --n 150 --out results/vlm
     # 2) attention knockout: block text->image attention in one window of LLM layers at a time
-    python part_b_vlm.py knockout --data data/coco400 --n 40 --window 3 --out results/vlm
+    python q6_vlm.py knockout --data data/coco1k --n 40 --window 3 --out results/vlm
 
 Question types follow POPE (Li et al. 2023): for each image one *present* object, and absent objects
 sampled at random, from the most frequent COCO classes ("popular"), or from the classes that co-occur
@@ -94,7 +94,7 @@ def cmd_knockout(args, meta, vlm, by_id, out):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("cmd", choices=["pope", "knockout"])
-    ap.add_argument("--data", default="data/coco400")
+    ap.add_argument("--data", default="data/coco1k")
     ap.add_argument("--model", default=VLM)
     ap.add_argument("--n", type=int, default=150, help="number of images")
     ap.add_argument("--window", type=int, default=3)
